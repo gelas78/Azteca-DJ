@@ -1,4 +1,3 @@
-// index.js (ESM)
 import 'dotenv/config';
 import {
   Client,
@@ -7,7 +6,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ComponentType,
+  ComponentType
 } from 'discord.js';
 
 import {
@@ -18,25 +17,25 @@ import {
   NoSubscriberBehavior,
   getVoiceConnection,
   VoiceConnectionStatus,
-  entersState,
+  entersState
 } from '@discordjs/voice';
 
 import play from 'play-dl';
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates]
 });
 
 // -------------------- Estado por servidor --------------------
-const state = new Map(); // guildId -> { songs, player, connection, playing, loop, shuffle, nowPlayingMsgId }
+const state = new Map(); // guildId -> { songs, player, connection, playing, loop, shuffle }
 
 function getState(guildId) {
   if (!state.has(guildId)) {
     const player = createAudioPlayer({
-      behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
+      behaviors: { noSubscriber: NoSubscriberBehavior.Pause }
     });
 
-    // Logs IMPORTANTES para debug
+    // Logs útiles
     player.on('error', (err) => {
       console.error('[AUDIO PLAYER ERROR]', err?.message ?? err);
       if (err?.stack) console.error(err.stack);
@@ -52,55 +51,46 @@ function getState(guildId) {
       connection: null,
       playing: false,
       loop: false,
-      shuffle: false,
-      nowPlayingMsgId: null,
+      shuffle: false
     });
   }
   return state.get(guildId);
 }
 
 function makeControls(q) {
-  const loopLabel = q.loop ? '🔁 ON' : '🔁 OFF';
-  const shuffleLabel = q.shuffle ? '🔀 ON' : '🔀 OFF';
-
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('toggle').setEmoji('⏯️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('skip').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId('loop').setLabel(loopLabel).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('shuffle').setLabel(shuffleLabel).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('loop').setEmoji('🔁').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('shuffle').setEmoji('🔀').setStyle(ButtonStyle.Secondary),
   );
 }
 
 async function resolveSong(query, requestedBy) {
   // URL
   if (query.startsWith('http://') || query.startsWith('https://')) {
-    // Intentar SoundCloud primero
+    // SoundCloud primero (más estable)
     const sc = await play.soundcloud(query).catch(() => null);
-    if (sc) {
-      return { title: sc.name, url: sc.url, thumbnail: sc.thumbnail, requestedBy };
-    }
+    if (sc) return { title: sc.name, url: sc.url, thumbnail: sc.thumbnail, requestedBy };
 
-    // Intentar “basic info” (puede servir para algunos links)
+    // Info básica para algunos links
     const info = await play.video_basic_info(query).catch(() => null);
     if (info?.video_details) {
       return {
         title: info.video_details.title,
         url: query,
         thumbnail: info.video_details.thumbnails?.at(-1)?.url ?? null,
-        requestedBy,
+        requestedBy
       };
     }
 
-    // Link directo (mp3, etc.)
+    // Link directo
     return { title: 'Audio', url: query, thumbnail: null, requestedBy };
   }
 
-  // Búsqueda (por estabilidad, SoundCloud)
-  const results = await play
-    .search(query, { limit: 1, source: { soundcloud: 'tracks' } })
-    .catch(() => []);
-
+  // Búsqueda (SoundCloud)
+  const results = await play.search(query, { limit: 1, source: { soundcloud: 'tracks' } }).catch(() => []);
   if (!results.length) return null;
 
   const r = results[0];
@@ -108,7 +98,7 @@ async function resolveSong(query, requestedBy) {
     title: r.title ?? r.name ?? query,
     url: r.url,
     thumbnail: r.thumbnails?.at(-1)?.url ?? r.thumbnail ?? null,
-    requestedBy,
+    requestedBy
   };
 }
 
@@ -128,31 +118,29 @@ async function connectToVoice(voiceChannel, q) {
     channelId: voiceChannel.id,
     guildId: voiceChannel.guild.id,
     adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-    selfDeaf: true, // recomendado para bots música
-    selfMute: false,
+    selfDeaf: true,
+    selfMute: false
   });
 
-  // Logs de voz IMPORTANTES
   connection.on('stateChange', (oldState, newState) => {
     console.log(`[VOICE] ${oldState.status} -> ${newState.status}`);
   });
 
   connection.on('error', (err) => {
-    console.error('[VOICE CONNECTION ERROR]', err?.message ?? err);
+    console.error('[VOICE ERROR]', err?.message ?? err);
     if (err?.stack) console.error(err.stack);
   });
 
-  // Esperar a Ready (si no llega, suele ser bloqueo UDP/hosting o permisos)
+  // Espera a READY (si falla aquí, suele ser permisos/UDP/hosting)
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
     console.log('[VOICE] Ready ✅');
   } catch (e) {
-    console.error('[VOICE] No llegó a Ready (posible bloqueo UDP o permisos).', e?.message ?? e);
+    console.error('[VOICE] No llegó a Ready ❌ (posible bloqueo UDP o permisos).', e?.message ?? e);
   }
 
   connection.subscribe(q.player);
   q.connection = connection;
-
   return connection;
 }
 
@@ -165,16 +153,13 @@ async function startPlayback(interaction, guildId) {
 
   q.playing = true;
 
-  // Intentar reproducir
   let stream;
   try {
     stream = await play.stream(next.url);
   } catch (e) {
-    console.error('[STREAM ERROR] No pude abrir stream:', e?.message ?? e);
+    console.error('[STREAM ERROR]', e?.message ?? e);
     q.playing = false;
-
-    // Saltar automáticamente a la siguiente
-    await interaction.followUp({ content: `❌ No pude reproducir: **${next.title}** (saltando)…` }).catch(() => {});
+    await interaction.followUp({ content: `❌ No pude reproducir **${next.title}** (saltando)…` }).catch(() => {});
     return startPlayback(interaction, guildId);
   }
 
@@ -187,23 +172,19 @@ async function startPlayback(interaction, guildId) {
     .setURL(next.url)
     .setThumbnail(next.thumbnail ?? null);
 
-  const msg = await interaction
-    .followUp({
-      embeds: [embed],
-      components: [makeControls(q)],
-    })
-    .catch(() => null);
+  const msg = await interaction.followUp({
+    embeds: [embed],
+    components: [makeControls(q)]
+  }).catch(() => null);
 
-  // Botones (5 minutos)
+  // Botones
   if (msg) {
     const collector = msg.createMessageComponentCollector({
       componentType: ComponentType.Button,
-      time: 5 * 60 * 1000,
+      time: 5 * 60 * 1000
     });
 
     collector.on('collect', async (btn) => {
-      // Puedes restringir controles a DJ/solicitante si quieres (luego lo hacemos)
-
       if (btn.customId === 'toggle') {
         if (q.player.state.status === 'playing') q.player.pause();
         else q.player.unpause();
@@ -225,27 +206,21 @@ async function startPlayback(interaction, guildId) {
       if (btn.customId === 'loop') {
         q.loop = !q.loop;
         await btn.reply({ content: `🔁 Loop: **${q.loop ? 'ON' : 'OFF'}**`, ephemeral: true });
-        // Actualiza botones
-        return msg.edit({ components: [makeControls(q)] }).catch(() => {});
+        return;
       }
 
       if (btn.customId === 'shuffle') {
         q.shuffle = !q.shuffle;
         await btn.reply({ content: `🔀 Shuffle: **${q.shuffle ? 'ON' : 'OFF'}**`, ephemeral: true });
-        // Actualiza botones
-        return msg.edit({ components: [makeControls(q)] }).catch(() => {});
+        return;
       }
     });
 
     collector.on('end', async () => {
-      // Desactiva botones al terminar
-      try {
-        await msg.edit({ components: [] });
-      } catch {}
+      try { await msg.edit({ components: [] }); } catch {}
     });
   }
 
-  // Cuando termina la canción
   q.player.once(AudioPlayerStatus.Idle, async () => {
     if (q.loop) q.songs.push(next);
     q.playing = false;
@@ -253,7 +228,7 @@ async function startPlayback(interaction, guildId) {
   });
 }
 
-// -------------------- Comandos --------------------
+// -------------------- Slash Commands --------------------
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
@@ -268,17 +243,19 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.reply({ content: '❌ Únete a un canal de voz primero.', ephemeral: true });
     }
 
-    // Evita timeout del interaction
+    // ✅ esto evita "The application did not respond"
     await interaction.deferReply();
 
-    // Conectar a voz (y loguear estado)
+    // Respuesta rápida mientras carga
+    await interaction.editReply('⏳ Preparando…');
+
     await connectToVoice(voiceChannel, q);
 
     const query = interaction.options.getString('query', true);
     const song = await resolveSong(query, interaction.user.username);
 
     if (!song) {
-      return interaction.editReply('❌ No encontré resultados. Prueba con un link de SoundCloud o link directo.');
+      return interaction.editReply('❌ No encontré resultados. Prueba con un link de SoundCloud o link directo');
     }
 
     q.songs.push(song);
@@ -303,9 +280,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (interaction.commandName === 'queue') {
-    if (!q.songs.length) {
-      return interaction.reply({ content: '📭 Cola vacía.', ephemeral: true });
-    }
+    if (!q.songs.length) return interaction.reply({ content: '📭 Cola vacía.', ephemeral: true });
     const list = q.songs.slice(0, 15).map((s, i) => `${i + 1}. ${s.title}`).join('\n');
     return interaction.reply({ embeds: [new EmbedBuilder().setTitle('📃 Cola').setDescription(list)] });
   }
@@ -323,10 +298,9 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-// -------------------- Ready --------------------
 client.once('ready', () => {
   console.log(`✅ Online como ${client.user.tag}`);
-  console.log('TIP: Si no se escucha, instala OPUS: npm i @discordjs/opus');
+  console.log('TIP: Si no se escucha en hosting, asegúrate de tener @discordjs/opus instalado.');
 });
 
 client.login(process.env.DISCORD_TOKEN);
