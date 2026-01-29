@@ -4,9 +4,9 @@ import { REST, Routes, SlashCommandBuilder } from 'discord.js';
 const commands = [
   new SlashCommandBuilder()
     .setName('play')
-    .setDescription('Reproduce: YouTube / SoundCloud / Spotify link (Spotify se puentea a YouTube)')
+    .setDescription('Busca y reproduce (elige entre 5 opciones) o pega un link directo')
     .addStringOption(o =>
-      o.setName('query').setDescription('Link o búsqueda').setRequired(true)
+      o.setName('query').setDescription('Título/artista o URL').setRequired(true)
     ),
   new SlashCommandBuilder().setName('skip').setDescription('Saltar canción'),
   new SlashCommandBuilder().setName('queue').setDescription('Ver cola'),
@@ -24,5 +24,10 @@ if (!token || !clientId || !guildId) {
 
 const rest = new REST({ version: '10' }).setToken(token);
 
-await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
-console.log('✅ Slash commands registrados (GUILD).');
+try {
+  await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
+  console.log('✅ Slash commands registrados (GUILD).');
+} catch (err) {
+  console.error('❌ Error registrando slash commands:', err);
+  process.exit(1);
+}
