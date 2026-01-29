@@ -71,9 +71,23 @@ async function resolveSong(query, requestedBy) {
   }
 
   // Búsqueda (preferimos SoundCloud por estabilidad)
-  const results = await play.search(query, { limit: 1, source: { soundcloud: 'tracks' } }).catch(() => []);
-  if (!results.length) return null;
+  //const results = await play.search(query, { limit: 1, source: { soundcloud: 'tracks' } }).catch(() => []);
+ // if (!results.length) return null;
+  //const r = results[0];
+
+  let results = await play.search(query, { limit: 1, source: { youtube: 'video' } }).catch(() => []);
+  if (!results.length) {
+  results = await play.search(query, { limit: 1, source: { soundcloud: 'tracks' } }).catch(() => []);
+}
+
   const r = results[0];
+return {
+  title: r.title ?? r.name ?? query,
+  url: r.url,
+  thumbnail: r.thumbnails?.at(-1)?.url ?? r.thumbnail ?? null,
+  requestedBy
+};
+
 
   return {
     title: r.title ?? r.name ?? query,
@@ -82,6 +96,7 @@ async function resolveSong(query, requestedBy) {
     requestedBy
   };
 }
+
 
 function pickNext(q) {
   if (!q.songs.length) return null;
