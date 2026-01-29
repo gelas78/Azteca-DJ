@@ -104,15 +104,9 @@ function pickNext(q) {
   return q.songs.shift();
 }
 
-/**
- * SoundCloud-first search (top 5).
- * Si SC falla o no hay resultados, intenta YouTube como fallback.
- */
-async function searchTop5(query) {
-  // 1) SoundCloud primero
+// ✅ SOLO SoundCloud: top 5
+async function searchTop5SoundCloud(query) {
   let results = [];
-  let sourceLabel = 'SoundCloud';
-
   try {
     results = await play.search(query, { limit: 5, source: { soundcloud: 'tracks' } });
     console.log('[SEARCH] SoundCloud:', results?.length ?? 0);
@@ -120,35 +114,19 @@ async function searchTop5(query) {
     console.error('[SEARCH] SoundCloud failed:', e?.message ?? e);
   }
 
-  // 2) Fallback: YouTube
-  if (!results.length) {
-    sourceLabel = 'YouTube';
-    try {
-      results = await play.search(query, { limit: 5, source: { youtube: 'video' } });
-      console.log('[SEARCH] YouTube:', results?.length ?? 0);
-    } catch (e) {
-      console.error('[SEARCH] YouTube failed:', e?.message ?? e);
-    }
-  }
-
   const normalized = results.slice(0, 5).map(r => ({
     title: r.title ?? r.name ?? 'Unknown',
     url: r.url,
     thumbnail: r.thumbnails?.at(-1)?.url ?? r.thumbnail ?? null,
-    sourceLabel,
+    sourceLabel: 'SoundCloud',
   }));
 
-  return { normalized, sourceLabel };
+  return normalized;
 }
 
-/**
- * Resolver a una canción reproducible.
- * - Spotify link: NO stream directo. Convertimos a texto y buscamos en SoundCloud (primero), luego YouTube.
- * - SoundCloud URL: OK
- * - YouTube URL: lo intentamos, puede fallar en Railway
- */
-async function resolveToPlayable(query, requestedBy) {
-  // Spotify link -> buscar equivalente (SoundCloud-first)
+// ✅ SOLO SoundCloud: resolver a canción reproducible
+async function resolveToPlayableSoundCloud(query, requestedBy) {
+  // Spotify -> convertir a texto -> buscar SOLO en SoundCloud
   if (query.includes('open.spotify.com')) {
     const sp = await play.spotify(query).catch(() => null);
     if (!sp) return null;
@@ -157,65 +135,35 @@ async function resolveToPlayable(query, requestedBy) {
     if (!firstTrack) return null;
 
     const searchText = `${firstTrack.name} ${firstTrack.artists?.[0]?.name ?? ''}`.trim();
+    const scRes = await play.search(searchText, { limit: 1, source: { soundcloud: 'tracks' } }).catch(() => []);
+    if (!scRes.length) return null;
 
-    // SoundCloud primero
-    let scRes = await play.search(searchText, { limit: 1, source: { soundcloud: 'tracks' } }).catch(() => []);
-    if (scRes.length) {
-      const r = scRes[0];
-      return {
-        title: `${firstTrack.name} — ${firstTrack.artists?.map(a => a.name).join(', ') ?? ''}`.trim(),
-        url: r.url,
-        thumbnail: r.thumbnails?.at(-1)?.url ?? r.thumbnail ?? null,
-        requestedBy,
-        sourceLabel: 'Spotify → SoundCloud',
-      };
-    }
-
-    // fallback YouTube
-    const yt = await play.search(searchText, { limit: 1, source: { youtube: 'video' } }).catch(() => []);
-    if (!yt.length) return null;
-
+    const r = scRes[0];
     return {
       title: `${firstTrack.name} — ${firstTrack.artists?.map(a => a.name).join(', ') ?? ''}`.trim(),
-      url: yt[0].url,
-      thumbnail: yt[0].thumbnails?.at(-1)?.url ?? null,
+      url: r.url,
+      thumbnail: r.thumbnails?.at(-1)?.url ?? r.thumbnail ?? null,
       requestedBy,
-      sourceLabel: 'Spotify → YouTube',
+      sourceLabel: 'Spotify → SoundCloud',
     };
   }
 
-  // URL directo
+  // URL directo: SOLO SoundCloud permitido
   if (query.startsWith('http://') || query.startsWith('https://')) {
-    // SoundCloud URL
     const sc = await play.soundcloud(query).catch(() => null);
-    if (sc) {
-      return { title: sc.name, url: sc.url, thumbnail: sc.thumbnail ?? null, requestedBy, sourceLabel: 'SoundCloud' };
-    }
+    if (!sc) return null;
 
-    // YouTube URL (puede fallar en Railway)
-    const info = await play.video_basic_info(query).catch(() => null);
-    if (info?.video_details) {
-      return {
-        title: info.video_details.title,
-        url: query,
-        thumbnail: info.video_details.thumbnails?.at(-1)?.url ?? null,
-        requestedBy,
-        sourceLabel: 'YouTube',
-      };
-    }
-
-    // Link genérico
-    return { title: 'Audio', url: query, thumbnail: null, requestedBy, sourceLabel: 'Direct' };
+    return {
+      title: sc.name,
+      url: sc.url,
+      thumbnail: sc.thumbnail ?? null,
+      requestedBy,
+      sourceLabel: 'SoundCloud',
+    };
   }
 
-  // Texto: SoundCloud primero, luego YouTube
-  let results = await play.search(query, { limit: 1, source: { soundcloud: 'tracks' } }).catch(() => []);
-  let label = 'SoundCloud';
-
-  if (!results.length) {
-    results = await play.search(query, { limit: 1, source: { youtube: 'video' } }).catch(() => []);
-    label = 'YouTube';
-  }
+  // Texto: SOLO SoundCloud
+  const results = await play.search(query, { limit: 1, source: { soundcloud: 'tracks' } }).catch(() => []);
   if (!results.length) return null;
 
   const r = results[0];
@@ -224,7 +172,7 @@ async function resolveToPlayable(query, requestedBy) {
     url: r.url,
     thumbnail: r.thumbnails?.at(-1)?.url ?? r.thumbnail ?? null,
     requestedBy,
-    sourceLabel: label,
+    sourceLabel: 'SoundCloud',
   };
 }
 
@@ -243,14 +191,7 @@ async function playNext(interaction, guildId) {
   } catch (e) {
     console.error('[STREAM ERROR]', e?.message ?? e);
     q.playing = false;
-
-    // Mensaje más útil para YouTube en Railway
-    const hint =
-      next.sourceLabel?.includes('YouTube')
-        ? '\n⚠️ Tip: En Railway a veces YouTube falla. Prueba con SoundCloud.'
-        : '';
-
-    await interaction.followUp({ content: `❌ No pude reproducir **${next.title}** (saltando)…${hint}` }).catch(() => {});
+    await interaction.followUp({ content: `❌ No pude reproducir **${next.title}** (saltando)…` }).catch(() => {});
     return playNext(interaction, guildId);
   }
 
@@ -280,23 +221,19 @@ async function playNext(interaction, guildId) {
         else q.player.unpause();
         return btn.deferUpdate();
       }
-
       if (btn.customId === 'skip') {
         q.player.stop(true);
         return btn.deferUpdate();
       }
-
       if (btn.customId === 'stop') {
         getVoiceConnection(guildId)?.destroy();
         state.delete(guildId);
         return btn.update({ content: '🛑 Detenido.', embeds: [], components: [] });
       }
-
       if (btn.customId === 'loop') {
         q.loop = !q.loop;
         return btn.reply({ content: `🔁 Loop: **${q.loop ? 'ON' : 'OFF'}**`, ephemeral: true });
       }
-
       if (btn.customId === 'shuffle') {
         q.shuffle = !q.shuffle;
         return btn.reply({ content: `🔀 Shuffle: **${q.shuffle ? 'ON' : 'OFF'}**`, ephemeral: true });
@@ -322,7 +259,6 @@ client.on('interactionCreate', async (interaction) => {
   const guildId = interaction.guildId;
   const q = getState(guildId);
 
-  // /play
   if (interaction.commandName === 'play') {
     try {
       const voiceChannel = interaction.member?.voice?.channel;
@@ -330,19 +266,22 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: '❌ Únete a un canal de voz primero.', ephemeral: true });
       }
 
-      // evita “The application did not respond”
       await interaction.deferReply();
-
       await connect(voiceChannel, q);
 
       const query = interaction.options.getString('query', true);
 
-      // Si es URL, directo sin lista
-      if (query.startsWith('http://') || query.startsWith('https://')) {
-        await interaction.editReply('⏳ Procesando link…');
+      // Si pega YouTube URL, decirle claramente que aquí solo SC
+      if (query.includes('youtube.com') || query.includes('youtu.be')) {
+        return interaction.editReply('⚠️ Este bot está configurado SOLO para **SoundCloud** en Railway. Pega un link de SoundCloud o busca por texto.');
+      }
 
-        const song = await resolveToPlayable(query, interaction.user.username);
-        if (!song) return interaction.editReply('❌ No pude leer ese link.');
+      // URL directo: solo SC
+      if (query.startsWith('http://') || query.startsWith('https://')) {
+        await interaction.editReply('⏳ Procesando link de SoundCloud…');
+
+        const song = await resolveToPlayableSoundCloud(query, interaction.user.username);
+        if (!song) return interaction.editReply('❌ Ese link no parece ser de SoundCloud o no pude leerlo.');
 
         q.songs.push(song);
 
@@ -358,24 +297,23 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // Texto: lista 5 (SoundCloud-first)
-      await interaction.editReply('🔎 Buscando opciones (SoundCloud)…');
+      // Texto: top 5 SOLO SC
+      await interaction.editReply('🔎 Buscando en SoundCloud (5 opciones)…');
 
-      const { normalized, sourceLabel } = await searchTop5(query);
-
-      if (!normalized.length) {
-        return interaction.editReply('❌ No encontré resultados. Prueba con un link directo de SoundCloud.');
+      const options = await searchTop5SoundCloud(query);
+      if (!options.length) {
+        return interaction.editReply('❌ No encontré resultados en **SoundCloud**. Prueba otro título/artista o pega un link de SoundCloud.');
       }
 
       const embed = new EmbedBuilder()
-        .setTitle(`Resultados (${sourceLabel})`)
-        .setDescription(normalized.map((r, i) => `**${i + 1}.** ${r.title}`).join('\n'));
+        .setTitle('Resultados (SoundCloud)')
+        .setDescription(options.map((r, i) => `**${i + 1}.** ${r.title}`).join('\n'));
 
       const menu = new StringSelectMenuBuilder()
         .setCustomId(`pick_song:${interaction.user.id}`)
         .setPlaceholder('Elige una canción (1–5)…')
         .addOptions(
-          normalized.map((r, i) => ({
+          options.map((r, i) => ({
             label: truncate(`${i + 1}. ${r.title}`),
             description: truncate(r.url),
             value: String(i),
@@ -402,11 +340,11 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       const idx = Number(picked.values[0]);
-      const chosen = normalized[idx];
+      const chosen = options[idx];
 
       await picked.deferUpdate();
 
-      const song = await resolveToPlayable(chosen.url, interaction.user.username);
+      const song = await resolveToPlayableSoundCloud(chosen.url, interaction.user.username);
       if (!song) {
         return interaction.editReply({ content: '❌ No pude reproducir esa opción. Prueba otra.', embeds: [], components: [] });
       }
@@ -432,13 +370,11 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
-  // /skip
   if (interaction.commandName === 'skip') {
     q.player.stop(true);
     return interaction.reply({ content: '⏭️ Skip!', ephemeral: true });
   }
 
-  // /queue
   if (interaction.commandName === 'queue') {
     if (!q.songs.length) return interaction.reply({ content: '📭 Cola vacía.', ephemeral: true });
 
@@ -450,7 +386,6 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.reply({ embeds: [new EmbedBuilder().setTitle('📃 Cola').setDescription(list)] });
   }
 
-  // /stop
   if (interaction.commandName === 'stop') {
     getVoiceConnection(guildId)?.destroy();
     state.delete(guildId);
