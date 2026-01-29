@@ -7,10 +7,10 @@
     "start": "node index.js",
     "deploy": "node deploy-commands.js"
   },
-  "dependencies": {
-    "@discordjs/voice": "^0.17.0",
-    "discord.js": "^14.16.0",
-    "dotenv": "^16.4.5",
-    "play-dl": "^1.9.7"
-  }
+"dependencies": {
+  "@discordjs/opus": "^0.10.0",
+  "@discordjs/voice": "^0.17.0",
+  "discord.js": "^14.16.0",
+  "dotenv": "^16.4.5",
+  "play-dl": "^1.9.7"
 }
