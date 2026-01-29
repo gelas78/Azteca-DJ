@@ -301,9 +301,26 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply('🔎 Buscando en SoundCloud (5 opciones)…');
 
       const options = await searchTop5SoundCloud(query);
-      if (!options.length) {
-        return interaction.editReply('❌ No encontré resultados en **SoundCloud**. Prueba otro título/artista o pega un link de SoundCloud.');
-      }
+   if (!options.length) {
+  const scUrl = `https://soundcloud.com/search/sounds?q=${encodeURIComponent(query)}`;
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setStyle(ButtonStyle.Link)
+      .setLabel('🔎 Buscar en SoundCloud')
+      .setURL(scUrl)
+  );
+
+  return interaction.editReply({
+    content:
+      '❌ No encontré resultados en **SoundCloud**.\n' +
+      '👉 Usa el botón para buscarla en SoundCloud y pega aquí el **link del track**.\n' +
+      '✅ Ejemplo: `/play https://soundcloud.com/usuario/cancion`',
+    components: [row],
+    embeds: []
+  });
+}
+
 
       const embed = new EmbedBuilder()
         .setTitle('Resultados (SoundCloud)')
