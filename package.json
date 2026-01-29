@@ -7,7 +7,6 @@
     "start": "node index.js",
     "deploy": "node deploy-commands.js",
     "clear:global": "node clear-global-commands.js"
-
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",
